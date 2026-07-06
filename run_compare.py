@@ -30,6 +30,7 @@ def load_settings() -> dict[str, Any]:
         "compare_props": os.getenv("COMPARE_PROPS", "true").lower() in {"1", "true", "yes"},
         "the_odds_api_key": os.getenv("THE_ODDS_API_KEY") or None,
         "max_prop_rows_per_game": int(os.getenv("MAX_PROP_ROWS_PER_GAME", "250")),
+        "max_game_market_rows_per_game": int(os.getenv("MAX_GAME_MARKET_ROWS_PER_GAME", "250")),
     }
 
 
@@ -125,10 +126,13 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                         game_label,
                         match.gs_event.team1,
                         match.gs_event.team2,
+                        match.team1_is_home,
                         gs_game_markets,
                         reference_lines,
+                        pinnacle_lines,
                     )
-                    game_market_rows = game_rows_to_dicts(gm_rows)
+                    gm_limit = settings["max_game_market_rows_per_game"]
+                    game_market_rows = game_rows_to_dicts(gm_rows[:gm_limit])
                     game_market_comparisons.extend(game_market_rows)
 
         game_payload: dict[str, Any] = {
@@ -159,6 +163,11 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         key=lambda row: abs(row.get("edge_vs_best") or 0),
         reverse=True,
     )[:25]
+    top_game_market_edges = sorted(
+        game_market_comparisons,
+        key=lambda row: abs(row.get("edge_vs_best") or 0),
+        reverse=True,
+    )[:25]
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -176,4 +185,5 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "prop_comparisons": prop_comparisons,
         "game_market_comparisons": game_market_comparisons,
         "top_prop_edges": top_prop_edges,
+        "top_game_market_edges": top_game_market_edges,
     }

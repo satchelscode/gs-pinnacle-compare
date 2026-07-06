@@ -58,7 +58,7 @@ def run_once() -> dict[str, Any]:
         payload["reference_books_configured"],
     )
     if payload["top_prop_edges"]:
-        logger.info("Top prop edges:")
+        logger.info("Top player prop edges:")
         for row in payload["top_prop_edges"][:5]:
             logger.info(
                 "%s | %s %s %s %.1f %s | GS %s | FD %s | PIN %s | edge %s",
@@ -68,6 +68,22 @@ def run_once() -> dict[str, Any]:
                 row["side"],
                 row["line"],
                 row["prop_type"],
+                row["gs_odds"],
+                row["fanduel_odds"],
+                row["pinnacle_odds"],
+                row["edge_vs_best"],
+            )
+    if payload.get("top_game_market_edges"):
+        logger.info("Top game prop edges:")
+        for row in payload["top_game_market_edges"][:5]:
+            logger.info(
+                "%s | %s %s %s %s %s | GS %s | FD %s | PIN %s | edge %s",
+                row["game"],
+                row.get("period"),
+                row["market_name"],
+                row.get("side"),
+                row.get("line"),
+                row["market_type"],
                 row["gs_odds"],
                 row["fanduel_odds"],
                 row["pinnacle_odds"],

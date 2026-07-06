@@ -115,6 +115,9 @@ ODDS_API_PLAYER_MARKETS: list[str] = [
 ]
 
 ODDS_API_GAME_MARKETS: list[str] = [
+    "h2h",
+    "spreads",
+    "totals",
     "team_totals",
     "alternate_team_totals",
     "alternate_spreads",
