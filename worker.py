@@ -50,10 +50,11 @@ def run_once() -> dict[str, Any]:
     )
     payload = run_comparison(settings)
     logger.info(
-        "Comparison complete | matched=%s main_rows=%s prop_rows=%s odds_api=%s",
+        "Comparison complete | matched=%s main_rows=%s prop_rows=%s game_market_rows=%s odds_api=%s",
         payload["matched_game_count"],
         payload["comparison_row_count"],
         payload["prop_comparison_row_count"],
+        payload["game_market_comparison_row_count"],
         payload["reference_books_configured"],
     )
     if payload["top_prop_edges"]:

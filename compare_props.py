@@ -10,6 +10,7 @@ from typing import Iterable
 from compare import normalize_team
 from gs_props import GSPropLine, normalize_player_name
 from odds_api_client import ReferencePropLine
+from prop_markets import comparison_prop_types
 
 
 @dataclass
@@ -44,14 +45,22 @@ def match_odds_api_event(gs_home: str, gs_away: str, gs_start, odds_events: list
     return best[1] if best else None
 
 
+def _reference_player_key(line: ReferencePropLine) -> str:
+    if line.player_name:
+        return normalize_player_name(line.player_name)
+    if line.selection:
+        return normalize_team(line.selection)
+    return ""
+
+
 def _index_reference_lines(lines: Iterable[ReferencePropLine]) -> dict[tuple, ReferencePropLine]:
     indexed: dict[tuple, ReferencePropLine] = {}
     for line in lines:
         key = (
             line.book,
             line.prop_type,
-            normalize_player_name(line.player_name),
-            round(line.line, 2),
+            _reference_player_key(line),
+            round(line.line, 2) if line.line is not None else None,
             line.side,
         )
         indexed[key] = line
@@ -80,12 +89,30 @@ def _has_over_under_pair(prop: GSPropLine, all_props: list[GSPropLine]) -> bool:
     return False
 
 
+def _lookup_reference(
+    indexed: dict[tuple, ReferencePropLine],
+    book: str,
+    prop_type: str,
+    player_key: str,
+    line: float,
+    side: str,
+) -> ReferencePropLine | None:
+    for candidate_type in comparison_prop_types(prop_type):
+        for delta in (0.0, -0.5, 0.5, -1.0, 1.0):
+            candidate_line = round(line + delta, 2)
+            ref = indexed.get((book, candidate_type, player_key, candidate_line, side))
+            if ref is not None:
+                return ref
+    return None
+
+
 def _reference_odds_for_key(
     indexed: dict[tuple, ReferencePropLine],
     key: tuple,
 ) -> int | None:
+    prop_type, player_key, line, side = key
     for book in ("fanduel", "pinnacle"):
-        ref = indexed.get((book, *key))
+        ref = _lookup_reference(indexed, book, prop_type, player_key, line, side)
         if ref is not None:
             return ref.american_odds
     return None
@@ -143,20 +170,8 @@ def compare_props(
 
     for gs_prop in deduplicate_gs_props(gs_props, reference_lines):
         player_key = normalize_player_name(gs_prop.player_name)
-        match_key_base = (gs_prop.prop_type, player_key, round(gs_prop.line, 2), gs_prop.side)
-
-        fanduel = indexed.get(("fanduel", *match_key_base))
-        pinnacle = indexed.get(("pinnacle", *match_key_base))
-
-        if not fanduel and not pinnacle:
-            # Try adjacent half-lines (GS sometimes stores integer thresholds).
-            for delta in (-0.5, 0.5):
-                alt_line = round(gs_prop.line + delta, 2)
-                alt_base = (gs_prop.prop_type, player_key, alt_line, gs_prop.side)
-                fanduel = fanduel or indexed.get(("fanduel", *alt_base))
-                pinnacle = pinnacle or indexed.get(("pinnacle", *alt_base))
-                if fanduel or pinnacle:
-                    break
+        fanduel = _lookup_reference(indexed, "fanduel", gs_prop.prop_type, player_key, gs_prop.line, gs_prop.side)
+        pinnacle = _lookup_reference(indexed, "pinnacle", gs_prop.prop_type, player_key, gs_prop.line, gs_prop.side)
 
         if not fanduel and not pinnacle:
             continue

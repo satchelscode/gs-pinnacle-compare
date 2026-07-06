@@ -9,6 +9,7 @@ from typing import Iterable
 
 from gs_client import GSLine, GSEvent, implied_probability
 from pinnacle_client import PinnacleEvent, PinnacleLine
+from prop_markets import GS_PINNACLE_PERIOD_MAP
 
 
 TEAM_ALIASES = {
@@ -72,7 +73,7 @@ def match_events(gs_events: Iterable[GSEvent], pinnacle_events: Iterable[Pinnacl
 
 
 def _pick_main_total(gs_lines: list[GSLine]) -> GSLine | None:
-    overs = [line for line in gs_lines if line.period == "m" and line.market_id == "5" and line.selection.endswith(":over")]
+    overs = [line for line in gs_lines if line.market_id == "5" and line.selection.endswith(":over")]
     if not overs:
         return None
 
@@ -93,11 +94,22 @@ def _pick_main_total(gs_lines: list[GSLine]) -> GSLine | None:
     return best_pair[1] if best_pair else None
 
 
-def compare_main_markets(match: MatchedEvent, gs_lines: list[GSLine], pinnacle_lines: list[PinnacleLine]) -> list[ComparisonRow]:
+def compare_main_markets(
+    match: MatchedEvent,
+    gs_lines: list[GSLine],
+    pinnacle_lines: list[PinnacleLine],
+    gs_period: str = "m",
+) -> list[ComparisonRow]:
+    pinnacle_period = GS_PINNACLE_PERIOD_MAP.get(gs_period, 0)
+    period_lines = [line for line in gs_lines if line.period == gs_period]
+    if not period_lines:
+        return []
+
     rows: list[ComparisonRow] = []
     game_label = f"{match.gs_event.team1} @ {match.gs_event.team2}"
+    period_label = "" if gs_period == "m" else f" [{gs_period}]"
 
-    gs_moneyline = {line.selection: line for line in gs_lines if line.period == "m" and line.market_id == "3"}
+    gs_moneyline = {line.selection: line for line in period_lines if line.market_id == "3"}
     for gs_side, label in [("1", match.gs_event.team1), ("2", match.gs_event.team2)]:
         gs_line = gs_moneyline.get(gs_side)
         if not gs_line:
@@ -107,18 +119,20 @@ def compare_main_markets(match: MatchedEvent, gs_lines: list[GSLine], pinnacle_l
             (
                 line
                 for line in pinnacle_lines
-                if line.market_type == "moneyline" and line.period == 0 and line.designation == pin_designation and not line.is_alternate
+                if line.market_type == "moneyline"
+                and line.period == pinnacle_period
+                and line.designation == pin_designation
+                and not line.is_alternate
             ),
             None,
         )
         if not pin_line:
             continue
-        rows.append(_build_row(game_label, "Moneyline", gs_line, label, pin_line, pin_line.designation))
+        rows.append(_build_row(game_label, f"Moneyline{period_label}", gs_line, label, pin_line, pin_line.designation))
 
-    # Main spread: pick the tightest-priced pair from market 6.
     spread_pairs: dict[float, dict[str, GSLine]] = {}
-    for line in gs_lines:
-        if line.period != "m" or line.market_id != "6" or ":" not in line.selection:
+    for line in period_lines:
+        if line.market_id != "6" or ":" not in line.selection:
             continue
         spread_key, side = line.selection.split(":", 1)
         if side not in {"1", "2"}:
@@ -148,7 +162,7 @@ def compare_main_markets(match: MatchedEvent, gs_lines: list[GSLine], pinnacle_l
                     line
                     for line in pinnacle_lines
                     if line.market_type == "spread"
-                    and line.period == 0
+                    and line.period == pinnacle_period
                     and not line.is_alternate
                     and line.line == signed_line
                     and line.designation == pin_designation
@@ -156,12 +170,12 @@ def compare_main_markets(match: MatchedEvent, gs_lines: list[GSLine], pinnacle_l
                 None,
             )
             if pin_line:
-                rows.append(_build_row(game_label, f"Spread {signed_line:+.1f}", gs_line, label, pin_line, f"{pin_line.designation} {signed_line:+.1f}"))
+                rows.append(_build_row(game_label, f"Spread {signed_line:+.1f}{period_label}", gs_line, label, pin_line, f"{pin_line.designation} {signed_line:+.1f}"))
 
-    over_line = _pick_main_total(gs_lines)
+    over_line = _pick_main_total(period_lines)
     if over_line:
         total_line = float(over_line.selection.split(":")[0])
-        under_line = next((line for line in gs_lines if line.selection == f"{total_line}:under"), None)
+        under_line = next((line for line in period_lines if line.selection == f"{total_line}:under"), None)
         for gs_line, label, designation in [
             (over_line, f"Over {total_line}", "over"),
             (under_line, f"Under {total_line}", "under"),
@@ -173,7 +187,7 @@ def compare_main_markets(match: MatchedEvent, gs_lines: list[GSLine], pinnacle_l
                     line
                     for line in pinnacle_lines
                     if line.market_type == "total"
-                    and line.period == 0
+                    and line.period == pinnacle_period
                     and not line.is_alternate
                     and line.line == total_line
                     and line.designation == designation
@@ -181,8 +195,22 @@ def compare_main_markets(match: MatchedEvent, gs_lines: list[GSLine], pinnacle_l
                 None,
             )
             if pin_line:
-                rows.append(_build_row(game_label, f"Total {total_line}", gs_line, label, pin_line, label))
+                rows.append(_build_row(game_label, f"Total {total_line}{period_label}", gs_line, label, pin_line, label))
 
+    return rows
+
+
+def compare_all_main_markets(
+    match: MatchedEvent,
+    gs_lines: list[GSLine],
+    pinnacle_lines: list[PinnacleLine],
+) -> list[ComparisonRow]:
+    rows: list[ComparisonRow] = []
+    periods = sorted({line.period for line in gs_lines if line.period in GS_PINNACLE_PERIOD_MAP})
+    if "m" not in periods:
+        periods = ["m", *periods]
+    for period in periods:
+        rows.extend(compare_main_markets(match, gs_lines, pinnacle_lines, gs_period=period))
     return rows
 
 

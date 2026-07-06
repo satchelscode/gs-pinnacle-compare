@@ -7,9 +7,11 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
-from compare import compare_main_markets, match_events
+from compare import compare_all_main_markets, match_events
+from compare_game_markets import compare_game_markets, rows_to_dicts as game_rows_to_dicts
 from compare_props import compare_props, match_odds_api_event, rows_to_dicts
 from gs_client import GSClient
+from gs_game_markets import extract_game_markets_for_event
 from gs_props import extract_props_for_event
 from odds_api_client import OddsApiClient
 from pinnacle_client import PinnacleClient
@@ -27,7 +29,7 @@ def load_settings() -> dict[str, Any]:
         "include_full_gs_lines": os.getenv("INCLUDE_FULL_GS_LINES", "false").lower() in {"1", "true", "yes"},
         "compare_props": os.getenv("COMPARE_PROPS", "true").lower() in {"1", "true", "yes"},
         "the_odds_api_key": os.getenv("THE_ODDS_API_KEY") or None,
-        "max_prop_rows_per_game": int(os.getenv("MAX_PROP_ROWS_PER_GAME", "100")),
+        "max_prop_rows_per_game": int(os.getenv("MAX_PROP_ROWS_PER_GAME", "250")),
     }
 
 
@@ -70,6 +72,7 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     games: list[dict[str, Any]] = []
     comparisons: list[dict[str, Any]] = []
     prop_comparisons: list[dict[str, Any]] = []
+    game_market_comparisons: list[dict[str, Any]] = []
 
     odds_api = None
     odds_events = []
@@ -80,12 +83,14 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     for match in matches:
         gs_lines = gs.extract_lines(match.gs_event.event_id, updates)
         pinnacle_lines = pinnacle.fetch_markets(match.pinnacle_event.matchup_id)
-        rows = compare_main_markets(match, gs_lines, pinnacle_lines)
+        rows = compare_all_main_markets(match, gs_lines, pinnacle_lines)
         comparisons.extend(asdict(row) for row in rows)
 
         game_label = f"{match.gs_event.team1} @ {match.gs_event.team2}"
         game_props: list[dict[str, Any]] = []
         game_prop_rows: list[dict[str, Any]] = []
+        game_markets: list[dict[str, Any]] = []
+        game_market_rows: list[dict[str, Any]] = []
 
         if settings["compare_props"]:
             coeff = coefficients.get(str(match.gs_event.event_id), {})
@@ -94,7 +99,13 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 coeff,
                 gs.market_name,
             )
+            gs_game_markets = extract_game_markets_for_event(
+                match.gs_event.event_id,
+                coeff,
+                gs.market_name,
+            )
             game_props = [asdict(prop) for prop in gs_props]
+            game_markets = [asdict(line) for line in gs_game_markets]
 
             if odds_api and odds_events:
                 odds_event = match_odds_api_event(
@@ -110,6 +121,16 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                     game_prop_rows = rows_to_dicts(prop_rows[:limit])
                     prop_comparisons.extend(game_prop_rows)
 
+                    gm_rows = compare_game_markets(
+                        game_label,
+                        match.gs_event.team1,
+                        match.gs_event.team2,
+                        gs_game_markets,
+                        reference_lines,
+                    )
+                    game_market_rows = game_rows_to_dicts(gm_rows)
+                    game_market_comparisons.extend(game_market_rows)
+
         game_payload: dict[str, Any] = {
             "gs_event_id": match.gs_event.event_id,
             "gs_partial_id": event_to_partial.get(match.gs_event.event_id),
@@ -118,14 +139,18 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             "start_time": match.gs_event.start_time.isoformat(),
             "gs_line_count": len(gs_lines),
             "gs_prop_count": len(game_props),
+            "gs_game_market_count": len(game_markets),
             "prop_comparison_count": len(game_prop_rows),
+            "game_market_comparison_count": len(game_market_rows),
             "main_market_rows": [asdict(row) for row in rows],
             "prop_rows": game_prop_rows,
+            "game_market_rows": game_market_rows,
         }
         if settings["include_full_gs_lines"]:
             game_payload["gs_lines"] = [asdict(line) for line in gs_lines]
         if settings["compare_props"]:
             game_payload["gs_props"] = game_props
+            game_payload["gs_game_markets"] = game_markets
 
         games.append(game_payload)
 
@@ -143,10 +168,12 @@ def run_comparison(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "matched_game_count": len(matches),
         "comparison_row_count": len(comparisons),
         "prop_comparison_row_count": len(prop_comparisons),
+        "game_market_comparison_row_count": len(game_market_comparisons),
         "props_enabled": settings["compare_props"],
         "reference_books_configured": bool(settings.get("the_odds_api_key")),
         "games": games,
         "comparisons": comparisons,
         "prop_comparisons": prop_comparisons,
+        "game_market_comparisons": game_market_comparisons,
         "top_prop_edges": top_prop_edges,
     }

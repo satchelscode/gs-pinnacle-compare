@@ -9,7 +9,7 @@ from typing import Any
 import requests
 
 from compare import normalize_team
-from prop_markets import ODDS_API_PROP_MARKETS, REFERENCE_BOOKS
+from prop_markets import ODDS_API_GAME_MARKETS, ODDS_API_PLAYER_MARKETS, REFERENCE_BOOKS
 
 
 @dataclass
@@ -20,9 +20,10 @@ class ReferencePropLine:
     away_team: str
     prop_type: str
     player_name: str
-    line: float
+    line: float | None
     side: str
     american_odds: int
+    selection: str | None = None
 
 
 class OddsApiClient:
@@ -44,11 +45,18 @@ class OddsApiClient:
         return self._get("/sports/baseball_mlb/events")
 
     def fetch_event_props(self, event_id: str) -> list[ReferencePropLine]:
+        player_lines = self._fetch_event_markets(event_id, ODDS_API_PLAYER_MARKETS)
+        game_lines = self._fetch_event_markets(event_id, ODDS_API_GAME_MARKETS)
+        return player_lines + game_lines
+
+    def _fetch_event_markets(self, event_id: str, markets: list[str]) -> list[ReferencePropLine]:
+        if not markets:
+            return []
         payload = self._get(
             f"/sports/baseball_mlb/events/{event_id}/odds",
             regions="us",
             oddsFormat="american",
-            markets=",".join(ODDS_API_PROP_MARKETS),
+            markets=",".join(markets),
             bookmakers=",".join(REFERENCE_BOOKS),
         )
         return self._parse_event_props(payload)
@@ -66,15 +74,36 @@ class OddsApiClient:
             for market in bookmaker.get("markets", []):
                 prop_type = str(market.get("key", ""))
                 for outcome in market.get("outcomes", []):
-                    player_name = outcome.get("description") or outcome.get("name", "")
-                    side = str(outcome.get("name", "")).lower()
+                    label = str(outcome.get("name", ""))
+                    side = label.lower()
+                    if side not in {"over", "under", "yes", "no"} and prop_type.startswith(("h2h", "spreads")):
+                        lines.append(
+                            ReferencePropLine(
+                                book=book,
+                                event_id=event_id,
+                                home_team=home,
+                                away_team=away,
+                                prop_type=prop_type,
+                                player_name="",
+                                line=outcome.get("point"),
+                                side=side,
+                                american_odds=int(outcome["price"]),
+                                selection=label,
+                            )
+                        )
+                        continue
                     if side not in {"over", "under", "yes", "no"}:
                         continue
                     point = outcome.get("point")
                     if point is None and side in {"yes", "no"}:
                         point = 0.5
-                    if point is None:
+                    if point is None and prop_type not in {"pitcher_record_a_win", "batter_first_home_run"}:
                         continue
+                    if point is None:
+                        point = 0.5
+                    player_name = outcome.get("description") or ""
+                    if not player_name and prop_type in {"team_totals", "alternate_team_totals"}:
+                        player_name = label
                     lines.append(
                         ReferencePropLine(
                             book=book,
@@ -86,6 +115,7 @@ class OddsApiClient:
                             line=float(point),
                             side="over" if side in {"over", "yes"} else "under",
                             american_odds=int(outcome["price"]),
+                            selection=label if not player_name else None,
                         )
                     )
         return lines
