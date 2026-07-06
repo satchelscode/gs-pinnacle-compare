@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from typing import Iterable
@@ -57,6 +58,80 @@ def _index_reference_lines(lines: Iterable[ReferencePropLine]) -> dict[tuple, Re
     return indexed
 
 
+def _gs_prop_key(prop: GSPropLine) -> tuple:
+    return (
+        prop.prop_type,
+        normalize_player_name(prop.player_name),
+        round(prop.line, 2),
+        prop.side,
+    )
+
+
+def _has_over_under_pair(prop: GSPropLine, all_props: list[GSPropLine]) -> bool:
+    opposite_side = "under" if prop.side == "over" else "over"
+    for candidate in all_props:
+        if (
+            candidate.market_id == prop.market_id
+            and candidate.player_id == prop.player_id
+            and candidate.line == prop.line
+            and candidate.side == opposite_side
+        ):
+            return True
+    return False
+
+
+def _reference_odds_for_key(
+    indexed: dict[tuple, ReferencePropLine],
+    key: tuple,
+) -> int | None:
+    for book in ("fanduel", "pinnacle"):
+        ref = indexed.get((book, *key))
+        if ref is not None:
+            return ref.american_odds
+    return None
+
+
+def deduplicate_gs_props(
+    gs_props: list[GSPropLine],
+    reference_lines: list[ReferencePropLine] | None = None,
+) -> list[GSPropLine]:
+    """Collapse duplicate GS rows for the same player/prop/line/side.
+
+    GS often emits multiple selection ids for the same prop (e.g. a main O/U
+    market and a longshot yes-style market). Prefer the row closest to a
+    reference book when available, otherwise the row with a paired opposite side.
+    """
+    indexed = _index_reference_lines(reference_lines or [])
+    grouped: dict[tuple, list[GSPropLine]] = defaultdict(list)
+    for prop in gs_props:
+        grouped[_gs_prop_key(prop)].append(prop)
+
+    deduped: list[GSPropLine] = []
+    for key, candidates in grouped.items():
+        if len(candidates) == 1:
+            deduped.append(candidates[0])
+            continue
+
+        ref_odds = _reference_odds_for_key(indexed, key)
+        if ref_odds is not None:
+            deduped.append(min(candidates, key=lambda prop: abs(prop.american_odds - ref_odds)))
+            continue
+
+        paired = [prop for prop in candidates if _has_over_under_pair(prop, gs_props)]
+        pool = paired or candidates
+        deduped.append(
+            min(
+                pool,
+                key=lambda prop: (
+                    abs(prop.american_odds + 110) if prop.american_odds < 0 else abs(prop.american_odds - 110),
+                    int(prop.player_id),
+                ),
+            )
+        )
+
+    return deduped
+
+
 def compare_props(
     game_label: str,
     gs_props: list[GSPropLine],
@@ -66,7 +141,7 @@ def compare_props(
     indexed = _index_reference_lines(reference_lines)
     rows: list[PropComparisonRow] = []
 
-    for gs_prop in gs_props:
+    for gs_prop in deduplicate_gs_props(gs_props, reference_lines):
         player_key = normalize_player_name(gs_prop.player_name)
         match_key_base = (gs_prop.prop_type, player_key, round(gs_prop.line, 2), gs_prop.side)
 
