@@ -12,5 +12,8 @@
   "capture": {
     "wait_seconds": 15,
     "output_file": "output/captured_session.json"
+  },
+  "odds_api": {
+    "the_odds_api_key": "PASTE_THE_ODDS_API_KEY_HERE"
   }
 }

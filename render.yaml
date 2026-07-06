@@ -15,5 +15,11 @@ services:
         value: "48"
       - key: INCLUDE_FULL_GS_LINES
         value: "false"
+      - key: COMPARE_PROPS
+        value: "true"
+      - key: MAX_PROP_ROWS_PER_GAME
+        value: "100"
+      - key: THE_ODDS_API_KEY
+        sync: false
       - key: WEBHOOK_URL
         sync: false

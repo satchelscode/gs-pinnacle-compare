@@ -40,18 +40,38 @@ def post_webhook(payload: dict[str, Any]) -> None:
 def run_once() -> dict[str, Any]:
     settings = load_settings()
     logger.info(
-        "Starting comparison | hours=%s partial_id=%s event_id=%s include_full_gs_lines=%s",
+        "Starting comparison | hours=%s partial_id=%s event_id=%s include_full_gs_lines=%s compare_props=%s odds_api=%s",
         settings["hours"],
         settings.get("partial_id"),
         settings.get("event_id"),
         settings["include_full_gs_lines"],
+        settings["compare_props"],
+        bool(settings.get("the_odds_api_key")),
     )
     payload = run_comparison(settings)
     logger.info(
-        "Comparison complete | matched=%s rows=%s",
+        "Comparison complete | matched=%s main_rows=%s prop_rows=%s odds_api=%s",
         payload["matched_game_count"],
         payload["comparison_row_count"],
+        payload["prop_comparison_row_count"],
+        payload["reference_books_configured"],
     )
+    if payload["top_prop_edges"]:
+        logger.info("Top prop edges:")
+        for row in payload["top_prop_edges"][:5]:
+            logger.info(
+                "%s | %s %s %s %.1f %s | GS %s | FD %s | PIN %s | edge %s",
+                row["game"],
+                row["player"],
+                row["market_name"],
+                row["side"],
+                row["line"],
+                row["prop_type"],
+                row["gs_odds"],
+                row["fanduel_odds"],
+                row["pinnacle_odds"],
+                row["edge_vs_best"],
+            )
     print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
     post_webhook(payload)
     return payload
