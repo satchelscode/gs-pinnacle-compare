@@ -1,0 +1,16 @@
+{
+  "gs": {
+    "base_url": "https://ppm.sportswidgets.pro",
+    "line_set": "U0VWU1NWUkJSMFU9",
+    "customer_id": "AD1426",
+    "iframe_url": "PASTE_FULL_IFRAME_SRC_URL_HERE"
+  },
+  "pinnacle": {
+    "base_url": "https://guest.api.arcadia.pinnacle.com/0.1",
+    "mlb_league_id": 246
+  },
+  "capture": {
+    "wait_seconds": 15,
+    "output_file": "output/captured_session.json"
+  }
+}

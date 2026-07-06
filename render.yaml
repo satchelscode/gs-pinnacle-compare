@@ -1,0 +1,19 @@
+services:
+  - type: worker
+    name: gs-pinnacle-compare
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: POLL_INTERVAL_SECONDS
+        value: "900"
+      - key: HOURS
+        value: "48"
+      - key: INCLUDE_FULL_GS_LINES
+        value: "false"
+      - key: WEBHOOK_URL
+        sync: false
